@@ -5,4 +5,4 @@ __pycache__/
 *.pyc
 .venv/
 *.csv
-*.parquet
+*.parquet.kis_token_cache.json
