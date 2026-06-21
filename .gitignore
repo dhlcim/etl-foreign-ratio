@@ -1,0 +1,8 @@
+.env
+secret.json
+*.log
+__pycache__/
+*.pyc
+.venv/
+*.csv
+*.parquet

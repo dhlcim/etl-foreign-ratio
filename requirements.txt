@@ -1,0 +1,6 @@
+pymysql==1.2.0
+sqlalchemy==2.0.50
+requests==2.34.2
+pandas==2.3.3
+python-dotenv==1.0.1
+finance-datareader==0.9.110
