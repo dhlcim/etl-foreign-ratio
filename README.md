@@ -1,84 +1,98 @@
-# 📊 ETL Foreign Ratio Project
+cat > README.md << 'ENDOFFILE'
+# 외국인 보유비율 ETL 시스템
 
-> 국내 주식 종목별 외국인 보유비율을 매일 자동 수집해 쌓아가는 ETL 파이프라인
+종목별 외국인 보유비율 데이터를 수집하고 관리하는 ETL 파이프라인입니다. 시가총액 상위 300개 종목을 대상으로, 과거 2년치 데이터 백필과 매일 신규 데이터 자동 수집 기능을 제공합니다.
 
-**한 줄 요약**: 시가총액 상위 300개 종목의 외국인 보유율을 KIS Open API + pykrx로 수집하여 MySQL에 저장하고, 크론탭으로 매일 자동 갱신합니다.
+## 시스템 흐름도
 
-## 목차
-- [사전 준비물](#사전-준비물)
-- [동작 원리](#동작-원리)
-- [결과물](#결과물)
-- [기술 스택](#기술-스택)
-- [사용법](#사용법)
-- [DB 스키마](#db-스키마)
-- [파일 구조](#파일-구조)
-- [알려진 제약사항](#알려진-제약사항)
-- [확장 가능성](#확장-가능성)
+```
+pykrx (KRX 정보데이터시스템)
+ -> 과거 2년치 백필 (1회성)
 
-## 사전 준비물
-- Python 3.12
-- MySQL 8.0 (로컬 또는 원격)
-- [KIS Developers](https://apiportal.koreainvestment.com) 계정 + APPKEY/APPSECRET 발급
-- [data.krx.co.kr](https://data.krx.co.kr) 계정 (pykrx 외국인 보유율 조회용)
+KIS Open API (한국투자증권)
+ -> 매일 신규 데이터 수집 (크론탭 자동 실행)
 
-## 동작 원리
+두 데이터 모두 -> MySQL UPSERT (날짜+종목코드 기준 중복 방지) -> foreign_ratio 테이블
+```
 
-\`\`\`mermaid
-flowchart TD
-    A[pykrx<br/>과거 2년치 백필] --> C[(MySQL<br/>foreign_ratio_db)]
-    B[KIS Open API<br/>매일 신규 수집] --> D{UPSERT<br/>중복 체크}
-    D -->|기존 날짜| E[UPDATE]
-    D -->|신규 날짜| F[INSERT]
-    E --> C
-    F --> C
-    C --> G[크론탭<br/>평일 16:00 자동 실행]
-    G --> B
-\`\`\`
+백필 데이터와 일별 수집 데이터가 같은 테이블에 합쳐지며, 날짜와 종목코드가 같으면 갱신(UPDATE), 다르면 신규 추가(INSERT)됩니다.
 
-처음 실행 시 2년치 과거 데이터를 한 번에 채우고(백필), 이후로는 매일 16:00에 오늘자 데이터만 자동으로 추가됩니다.
+## 주요 기능
 
-## 결과물
-- 누적 데이터: **142,651건** (시가총액 상위 300종목 × 약 2년치)
-- 매일 신규 적재: 약 300건/일
+- 시가총액 상위 300개 종목(KOSPI+KOSDAQ) 자동 선정
+- 과거 2년치 외국인 보유비율 일괄 백필
+- 매일 16시 신규 데이터 자동 수집 및 적재
+- KIS API 토큰 캐싱으로 불필요한 재발급 방지
+- 휴장일 자동 감지 및 수집 스킵
+- 네트워크 오류 발생 시 자동 재시도
 
 ## 기술 스택
-| 영역 | 사용 기술 |
-|---|---|
-| 언어 | Python 3.12 (venv) |
-| DB | MySQL 8.0 |
-| 시세/보유율 API | KIS Open API (한국투자증권), pykrx |
-| 자동화 | crontab |
-| 개발환경 | WSL2(Ubuntu 24.04) + VS Code Remote-SSH |
 
-## 사용법
+### 데이터 수집
 
-\`\`\`bash
-# 1. 패키지 설치
+- KIS Open API (한국투자증권)
+- pykrx (KRX 정보데이터시스템)
+- FinanceDataReader
+
+### 데이터베이스
+
+- MySQL 8.0
+- SQLAlchemy
+
+### 자동화
+
+- crontab
+
+### 개발환경
+
+- Python 3.12 (venv)
+- WSL2 (Ubuntu 24.04)
+- VS Code Remote-SSH
+
+## 프로젝트 구조
+
+```
+etl-foreign-ratio/
+├─ kis_common.py          # 공통 유틸 (토큰 캐싱, 휴장일 체크, 재시도)
+├─ create_table.py        # DB 테이블 생성
+├─ backfill_2years.py     # 과거 2년치 백필 (pykrx)
+├─ collect_daily.py       # 매일 신규분 수집 (KIS API)
+├─ requirements.txt       # 패키지 목록
+├─ .env                   # DB 접속 정보 (git 미포함)
+├─ secret.json            # API 인증키 (git 미포함)
+├─ logs/                  # 크론탭 실행 로그
+└─ README.md
+```
+
+## 실행 방법
+
+Python 3.12, MySQL 8.0이 설치되어 있어야 합니다.
+
+```
+git clone https://github.com/dhlcim/etl-foreign-ratio.git
+cd etl-foreign-ratio
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
+```
 
-# 2. .env, secret.json 작성 (아래 예시 참고)
+## 환경변수 설정
 
-# 3. DB 테이블 생성 (최초 1회)
-python3 create_table.py
+`.env`와 `secret.json` 파일을 직접 작성합니다.
 
-# 4. 과거 2년치 백필 (최초 1회)
-python3 backfill_2years.py
+`.env` 예시:
 
-# 5. 매일 신규 수집 (크론탭에 등록되어 자동 실행됨)
-python3 collect_daily.py
-\`\`\`
-
-### .env 예시
-\`\`\`
+```
 DB_HOST=localhost
 DB_PORT=3306
 DB_USER=root
 DB_PASS=your_password
 DB_NAME=foreign_ratio_db
-\`\`\`
+```
 
-### secret.json 예시
-\`\`\`json
+`secret.json` 예시:
+
+```
 {
   "KIS_APPKEY": "your_kis_appkey",
   "KIS_APPSECRET": "your_kis_appsecret",
@@ -88,46 +102,83 @@ DB_NAME=foreign_ratio_db
   "KRX_ID": "your_krx_id",
   "KRX_PW": "your_krx_password"
 }
-\`\`\`
+```
 
-## ⏰ 크론탭 설정
-\`\`\`
-0 16 * * 1-5 cd /home/etl/etl-foreign-ratio && /home/etl/etl-foreign-ratio/.venv/bin/python3 collect_daily.py >> logs/daily_$(date +\%Y\%m\%d).log 2>&1
-\`\`\`
-평일 16:00(장마감 후) 자동 실행
+## 데이터 수집 실행
 
-## DB 스키마
+```
+# DB 테이블 생성 (최초 1회)
+python3 create_table.py
 
-\`\`\`mermaid
-erDiagram
-  FOREIGN_RATIO {
-    date date PK
-    string ticker PK
-    string ticker_name
-    double foreign_holding_ratio
-    bigint foreign_holding_qty
-    double close_price
-    timestamp created_at
-  }
-\`\`\`
+# 과거 2년치 백필 (최초 1회)
+python3 backfill_2years.py
 
-## 파일 구조
-| 파일 | 역할 |
-|---|---|
-| `kis_common.py` | 공통 유틸 (토큰 캐싱 · 휴장일 체크 · API 재시도) |
-| `create_table.py` | DB 테이블 생성 |
-| `backfill_2years.py` | 과거 2년치 백필 (pykrx) |
-| `collect_daily.py` | 매일 신규분 수집 (KIS API, 크론탭 등록 대상) |
-| `.env` / `secret.json` | DB·API 인증 정보 (git 미포함) |
+# 매일 신규 수집 (크론탭에 등록되어 자동 실행됨)
+python3 collect_daily.py
+```
 
-## 알려진 제약사항
-- KIS 모의투자 계좌는 **연속 API 호출 제한이 낮아**, 종목당 1.5초 간격으로 호출하도록 설계됨 (300종목 기준 약 7~8분 소요)
-- 외국인 보유율 "현재가" API(`inquire-price`)는 **과거 날짜 조회 미지원** → 과거 데이터는 별도로 pykrx 사용
-- 일부 KIS 시세분석 API(`종목별 외인기관 추정가집계` 등)는 **모의투자 미지원**으로 사용 불가 확인됨
-- 종목 수집 범위는 시가총액 상위 300개로 제한 (전체 종목 미지원)
+## 크론탭 설정
 
-## 확장 가능성
-- 전체 종목(KOSPI+KOSDAQ 약 2,700개)으로 수집 범위 확장
-- 실전투자 계좌 전환으로 호출 제한 개선
-- 알림 기능(텔레그램/이메일) 추가
-- 데이터 검증(이상치 탐지) 스크립트 추가
+```
+0 16 * * 1-5 cd /home/etl/etl-foreign-ratio && /home/etl/etl-foreign-ratio/.venv/bin/python3 collect_daily.py
+```
+
+평일 16시(장마감 후)에 자동 실행됩니다.
+
+## 데이터베이스 구조
+
+`foreign_ratio` 테이블에 종목별 일자별 외국인 보유비율이 저장됩니다. 날짜와 종목코드 조합을 유일하게 관리하며, 같은 조합으로 다시 저장하면 새로 추가하지 않고 기존 값을 수정합니다.
+
+| 컬럼 | 타입 | 설명 |
+|---|---|---|
+| date | DATE (PK) | 기준일 |
+| ticker | VARCHAR(10) (PK) | 종목코드 |
+| ticker_name | VARCHAR(50) | 종목명 |
+| foreign_holding_ratio | DOUBLE | 외국인 보유율(%) |
+| foreign_holding_qty | BIGINT | 외국인 보유 수량 |
+| close_price | DOUBLE | 종가 |
+| created_at | TIMESTAMP | 데이터 생성 시각 |
+
+## 데이터베이스 조회 방법
+
+MySQL에 직접 접속해서 확인할 수 있습니다.
+
+```
+mysql -u root -p
+```
+
+접속 후 테이블 목록을 확인합니다.
+
+```
+USE foreign_ratio_db;
+SHOW TABLES;
+```
+
+전체 데이터 건수를 확인합니다.
+
+```
+SELECT COUNT(*) FROM foreign_ratio;
+```
+
+특정 종목의 최근 외국인 보유율 추이를 조회합니다.
+
+```
+SELECT date, ticker_name, foreign_holding_ratio
+FROM foreign_ratio
+WHERE ticker = '005930'
+ORDER BY date DESC
+LIMIT 10;
+```
+
+## 참고
+
+- 누적 데이터: 142,651건 (시가총액 상위 300종목 x 약 2년치)
+- 매일 신규 적재: 약 300건/일
+- KIS 모의투자 계좌는 연속 호출 제한이 있어 종목당 1.5초 간격으로 호출합니다.
+- 외국인 보유율 현재가 API는 과거 날짜 조회를 지원하지 않아 과거 데이터는 pykrx로 수집합니다.
+- 수집 범위는 시가총액 상위 300종목으로 한정되어 있습니다.
+
+---
+
+2026 ETL Foreign Ratio Project.
+ENDOFFILE
